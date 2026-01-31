@@ -1,4 +1,4 @@
-"""Main Streamlit application"""
+"""Main Streamlit application - AI Resume Job Matcher"""
 import streamlit as st
 
 # Import components
@@ -30,6 +30,147 @@ if not RAPIDAPI_KEY:
 
 # Initialize AI analyzer
 analyzer = ResumeAnalyzer()
+
+def _generate_search_strategies(info):
+    """
+    Generate multiple search strategies based on resume info
+    
+    Args:
+        info (dict): Resume information
+        
+    Returns:
+        list: List of search strategy dictionaries
+    """
+    strategies = []
+    
+    job_title = (info.get("job_title") or "").strip()
+    top_skills = info.get("top_skills") or []
+    location = (info.get("preferred_location") or "Pune, India").strip()
+    years_exp = info.get("years_experience", 0)
+    
+    # Strategy 1: Primary job title
+    if job_title and job_title.lower() not in ["not found", "not extracted", ""]:
+        strategies.append({
+            "keywords": job_title,
+            "location": location
+        })
+    
+    # Strategy 2: Top skill + "developer/engineer/intern"
+    if top_skills:
+        main_skill = top_skills[0]
+        if years_exp == 0:
+            strategies.append({
+                "keywords": f"{main_skill} intern",
+                "location": location
+            })
+            strategies.append({
+                "keywords": f"{main_skill} entry level",
+                "location": location
+            })
+        else:
+            strategies.append({
+                "keywords": f"{main_skill} developer",
+                "location": location
+            })
+    
+    # Strategy 3: Combination of top skills
+    if len(top_skills) >= 2:
+        skill_combo = f"{top_skills[0]} {top_skills[1]}"
+        strategies.append({
+            "keywords": skill_combo,
+            "location": location
+        })
+    
+    # Strategy 4: Broader location search if specific location yields few results
+    if "," in location:  # e.g., "Pune, India"
+        country = location.split(",")[-1].strip()
+        if job_title and job_title.lower() not in ["not found", "not extracted", ""]:
+            strategies.append({
+                "keywords": job_title,
+                "location": country
+            })
+    
+    # Ensure at least one strategy
+    if not strategies:
+        strategies.append({
+            "keywords": "entry level developer" if years_exp == 0 else "developer",
+            "location": location
+        })
+    
+    return strategies[:4]  # Limit to 4 strategies to avoid too many API calls
+
+def _perform_auto_search(info):
+    """Perform automatic job search based on AI analysis"""
+    # Generate search strategies
+    strategies = _generate_search_strategies(info)
+    
+    all_jobs = []
+    seen_links = set()  # Avoid duplicates
+    
+    with st.spinner("🔍 AI is searching multiple job sources..."):
+        progress_bar = st.progress(0)
+        
+        for idx, strategy in enumerate(strategies):
+            st.caption(f"🔎 Searching: {strategy['keywords']} in {strategy['location']}")
+            
+            try:
+                jobs = search_jobs(
+                    strategy['keywords'],
+                    strategy['location'],
+                    "month",
+                    num_results=5,
+                    resume_info=info
+                )
+                
+                # Add unique jobs
+                for job in jobs:
+                    if job['link'] not in seen_links:
+                        seen_links.add(job['link'])
+                        all_jobs.append(job)
+                
+            except Exception as e:
+                st.warning(f"⚠️ Search '{strategy['keywords']}' failed: {str(e)}")
+            
+            progress_bar.progress((idx + 1) / len(strategies))
+        
+        progress_bar.empty()
+    
+    if all_jobs:
+        # Sort by relevance (you can add scoring logic here)
+        render_jobs(all_jobs[:10], "AI-matched positions", info.get('preferred_location', 'Multiple locations'))
+    else:
+        st.warning("😔 No jobs found. Try customizing the search.")
+        st.info("💡 Click 'Customize Search' below to try different keywords or locations.")
+
+def _perform_custom_search(keywords, location, date_filter, info):
+    """Perform custom search with user overrides"""
+    # Use AI values if custom values not provided
+    if not keywords:
+        job_title = (info.get("job_title") or "").strip()
+        top_skills = info.get("top_skills") or []
+        
+        if job_title and job_title.lower() not in ["not found", "not extracted", ""]:
+            keywords = job_title
+        elif top_skills:
+            keywords = top_skills[0]
+        else:
+            keywords = "Software Developer"
+    
+    if not location:
+        location = (info.get("preferred_location") or "Pune, India").strip()
+    
+    with st.spinner("🔍 Searching with your custom settings..."):
+        try:
+            jobs = search_jobs(
+                keywords,
+                location,
+                date_filter,
+                num_results=10,
+                resume_info=info
+            )
+            render_jobs(jobs, keywords, location)
+        except Exception as e:
+            st.error(f"❌ Search error: {str(e)}")
 
 # Render components
 render_header()
@@ -85,51 +226,83 @@ if uploaded_file is not None:
                 "preferred_location": DEFAULT_LOCATION
             }
         
-        # Job Search Section
+        # === Automatic Job Search ===
         st.markdown("---")
-        st.markdown("### 🔍 Step 2: Search for Jobs")
+        st.markdown("### 🔍 Step 2: AI-Matched Job Recommendations")
         
         # Get resume info
         info = st.session_state.get("resume_info", {})
-        job_title = (info.get("job_title") or "").strip()
-        default_location = (info.get("preferred_location") or DEFAULT_LOCATION).strip()
-        top_skills = info.get("top_skills") or []
         
-        # Default keywords
-        if job_title and job_title.lower() not in ["not found", "not extracted", ""]:
-            default_keywords = job_title
-        elif top_skills:
-            default_keywords = top_skills[0]
-        else:
-            default_keywords = DEFAULT_JOB_TITLE
+        # Show what AI will search for
+        st.info("🤖 **AI will automatically find the best job matches for your profile**")
         
-        # Search form
-        with st.form("job_search_form"):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            
-            with col1:
-                search_keywords = st.text_input("🔎 Job Keywords", value=default_keywords)
-            
-            with col2:
-                search_location = st.text_input("📍 Location", value=default_location)
-            
-            with col3:
-                date_filter = st.selectbox(
-                    "📅 Posted",
-                    ["month", "week", "3days", "today", "all"],
-                    format_func=lambda x: {"all": "All time", "today": "Today", "3days": "3 days", "week": "Week", "month": "Month"}[x]
-                )
-            
-            search_button = st.form_submit_button("🚀 Search Jobs", use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**🎯 Search Strategy:**")
+            st.write(f"• **Primary:** {info.get('job_title', 'Software Developer')}")
+            top_skills_display = ', '.join(info.get('top_skills', [])[:3])
+            st.write(f"• **Skills:** {top_skills_display if top_skills_display else 'General'}")
+            st.write(f"• **Location:** {info.get('preferred_location', 'Pune, India')}")
         
-        # Execute search
-        if search_button:
-            with st.spinner("🔍 Searching across Google Jobs, LinkedIn, Indeed..."):
-                try:
-                    jobs = search_jobs(search_keywords, search_location, date_filter)
-                    render_jobs(jobs, search_keywords, search_location)
-                except Exception as e:
-                    st.error(f"❌ Search error: {str(e)}")
+        with col2:
+            years_exp = info.get('years_experience', 0)
+            if years_exp == 0:
+                st.markdown("**🎓 Experience Level:** Fresher/Student")
+                st.caption("Looking for: Internships, Entry-level, Trainee roles")
+            elif years_exp <= 2:
+                st.markdown("**💼 Experience Level:** Junior")
+                st.caption("Looking for: Junior, Associate roles")
+            elif years_exp <= 5:
+                st.markdown("**📈 Experience Level:** Mid-level")
+                st.caption("Looking for: Mid-level positions")
+            else:
+                st.markdown("**⭐ Experience Level:** Senior")
+                st.caption("Looking for: Senior, Lead positions")
+        
+        # Advanced search options (collapsible)
+        with st.expander("🎛️ Customize Search (Optional)", expanded=False):
+            st.caption("💡 Only use this if you want to override AI recommendations")
+            
+            with st.form("custom_search_form"):
+                col1, col2, col3 = st.columns([2, 2, 1])
+                
+                with col1:
+                    custom_keywords = st.text_input(
+                        "Custom Keywords",
+                        value="",
+                        placeholder="Leave empty to use AI recommendations"
+                    )
+                
+                with col2:
+                    custom_location = st.text_input(
+                        "Custom Location",
+                        value="",
+                        placeholder="Leave empty to use AI recommendations"
+                    )
+                
+                with col3:
+                    date_filter = st.selectbox(
+                        "Posted",
+                        ["month", "week", "3days", "today", "all"],
+                        format_func=lambda x: {
+                            "all": "All time",
+                            "today": "Today",
+                            "3days": "3 days",
+                            "week": "Week",
+                            "month": "Month"
+                        }[x]
+                    )
+                
+                custom_search_button = st.form_submit_button("🔍 Search with Custom Settings", use_container_width=True)
+            
+            # Handle custom search
+            if custom_search_button:
+                _perform_custom_search(custom_keywords, custom_location, date_filter, info)
+        
+        # Auto-search button (primary action)
+        st.markdown("")  # Spacing
+        if st.button("🚀 Find Jobs Automatically", type="primary", use_container_width=True):
+            _perform_auto_search(info)
     
     except ValueError as e:
         st.error(f"❌ {str(e)}")

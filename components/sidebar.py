@@ -16,7 +16,7 @@ def render_sidebar():
         
         # Show API key status
         if RAPIDAPI_KEY:
-            masked_key = RAPIDAPI_KEY[:6] + "•••" + RAPIDAPI_KEY[-4:]
+            masked_key = RAPIDAPI_KEY[:2] + "•••" + RAPIDAPI_KEY[-2:]
             st.caption(f"🔑 API Key: `{masked_key}`")
         
         st.markdown("---")

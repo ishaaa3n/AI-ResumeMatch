@@ -1,0 +1,16 @@
+streamlit==1.31.0
+python-dotenv==1.0.0
+requests==2.31.0
+PyPDF2==3.0.1
+langchain-community==0.0.20
+```
+
+### 13. `.gitignore`
+```
+.env
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+*.pdf
+venv/
+.vscode/

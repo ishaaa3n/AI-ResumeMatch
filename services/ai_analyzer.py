@@ -26,7 +26,7 @@ Resume text:
 {resume_text}
 
 Return this exact JSON structure:
-{{"full_name": "name here", "job_title": "title here", "years_experience": 3, "top_skills": ["skill1", "skill2", "skill3"], "preferred_location": "Pune"}}
+{{"full_name": "name here", "job_title": "title here", "years_experience": number, "top_skills": ["skill1", "skill2", "skill3"], "preferred_location": "Pune"}}
 
 JSON only:"""
         
